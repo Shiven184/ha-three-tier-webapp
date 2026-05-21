@@ -1,0 +1,137 @@
+# .github/workflows/deploy-prod.yml
+#
+# Project 3 - HA 3-Tier Web App - Prod Deployment
+#
+# Prod is ALWAYS manual trigger only.
+# Nobody auto-deploys to production on every merge in infrastructure teams.
+# A human must make a conscious decision to deploy to prod.
+#
+# In a real company this would also require:
+# - A second person to approve the deployment (approval gates)
+# - A change management ticket number
+# - A deployment window (e.g. only between 10 PM and 2 AM)
+#
+# For your portfolio, manual trigger with a deploy/destroy choice is correct.
+
+name: Deploy to Prod (3-Tier App)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'deploy = create/update stack | destroy = delete stack'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - destroy
+      confirm:
+        description: 'Type CONFIRM to proceed with prod deployment'
+        required: true
+        default: ''
+
+jobs:
+
+  validate:
+    name: Validate Template
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify confirmation input
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "CONFIRM" ]; then
+            echo "ERROR: You must type CONFIRM in the confirm field to deploy to prod."
+            exit 1
+          fi
+          echo "Confirmation received. Proceeding."
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+
+      - name: Lint template
+        run: cfn-lint cloudformation/three-tier.yaml
+
+      - name: Validate template against AWS
+        run: |
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/three-tier.yaml
+
+  deploy:
+    name: Deploy Stack to Prod
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event.inputs.action == 'deploy'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Deploy CloudFormation stack to prod
+        run: |
+          aws cloudformation deploy \
+            --template-file cloudformation/three-tier.yaml \
+            --stack-name ha-webapp-prod \
+            --region ${{ secrets.AWS_REGION }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides \
+              ProjectName=ha-webapp-prod \
+              KeyPairName=${{ secrets.EC2_KEY_PAIR_NAME }} \
+              DBPassword=${{ secrets.DB_PASSWORD }} \
+            --no-fail-on-empty-changeset
+
+      - name: Print ALB URL and stack outputs
+        run: |
+          echo "Prod deployment complete."
+          aws cloudformation describe-stacks \
+            --stack-name ha-webapp-prod \
+            --region ${{ secrets.AWS_REGION }} \
+            --query "Stacks[0].Outputs" \
+            --output table
+
+  destroy:
+    name: Destroy Prod Stack
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event.inputs.action == 'destroy'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Delete prod stack
+        run: |
+          echo "Deleting prod stack ha-webapp-prod..."
+          aws cloudformation delete-stack \
+            --stack-name ha-webapp-prod \
+            --region ${{ secrets.AWS_REGION }}
+
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ha-webapp-prod \
+            --region ${{ secrets.AWS_REGION }}
+
+          echo "Prod stack deleted."

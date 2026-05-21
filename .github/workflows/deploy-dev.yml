@@ -1,0 +1,147 @@
+# .github/workflows/deploy-dev.yml
+#
+# Project 3 - HA 3-Tier Web App - Dev Deployment
+#
+# This pipeline has TWO triggers unlike Project 2:
+#
+# 1. Push to dev branch  - runs validation only (lint + template check)
+#    We do NOT auto-deploy on every push because this project costs ~$38/month.
+#    You want to control when AWS resources are actually created.
+#
+# 2. Manual trigger (workflow_dispatch) - actually deploys to AWS
+#    Go to GitHub > Actions > Deploy Dev > Run workflow
+#    This is a deliberate choice - you click deploy when you are ready.
+#
+# This is exactly how cost-sensitive infrastructure is managed in real teams.
+# Serverless (Project 2) can auto-deploy freely because it costs nothing at rest.
+# EC2 + RDS + ALB + NAT cost money every hour they exist.
+
+name: Deploy to Dev (3-Tier App)
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - 'cloudformation/**'
+      - '.github/workflows/**'
+
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'deploy = create/update stack | destroy = delete stack'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - destroy
+
+jobs:
+
+  validate:
+    name: Validate CloudFormation Template
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      # cfn-lint is the industry standard CloudFormation linter.
+      # It catches mistakes in your YAML before they hit AWS.
+      # This is the infrastructure equivalent of unit tests.
+      - name: Install cfn-lint
+        run: pip install cfn-lint
+
+      - name: Lint CloudFormation template
+        run: |
+          cfn-lint cloudformation/three-tier.yaml
+          echo "Lint passed - no template errors found."
+
+      # aws cloudformation validate-template checks the template
+      # against AWS's own API. Catches things cfn-lint misses.
+      - name: Validate template against AWS
+        run: |
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/three-tier.yaml
+          echo "AWS validation passed."
+
+  deploy:
+    name: Deploy Stack to Dev
+    runs-on: ubuntu-latest
+    needs: validate
+    # Only actually deploy when manually triggered with action = deploy
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Deploy CloudFormation stack to dev
+        run: |
+          aws cloudformation deploy \
+            --template-file cloudformation/three-tier.yaml \
+            --stack-name ha-webapp-dev \
+            --region ${{ secrets.AWS_REGION }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --parameter-overrides \
+              ProjectName=ha-webapp-dev \
+              KeyPairName=${{ secrets.EC2_KEY_PAIR_NAME }} \
+              DBPassword=${{ secrets.DB_PASSWORD }} \
+            --no-fail-on-empty-changeset
+
+      - name: Print ALB URL
+        run: |
+          echo "Dev stack deployed."
+          aws cloudformation describe-stacks \
+            --stack-name ha-webapp-dev \
+            --region ${{ secrets.AWS_REGION }} \
+            --query "Stacks[0].Outputs[?OutputKey=='ALBDNSName'].OutputValue" \
+            --output text
+
+  destroy:
+    name: Destroy Dev Stack
+    runs-on: ubuntu-latest
+    needs: validate
+    # Only runs when manually triggered with action = destroy
+    # Use this to delete resources and stop paying when done testing
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Delete dev stack
+        run: |
+          echo "Deleting stack ha-webapp-dev..."
+          aws cloudformation delete-stack \
+            --stack-name ha-webapp-dev \
+            --region ${{ secrets.AWS_REGION }}
+
+          echo "Waiting for deletion to complete (takes 5-10 minutes)..."
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ha-webapp-dev \
+            --region ${{ secrets.AWS_REGION }}
+
+          echo "Stack deleted. All resources and charges stopped."
