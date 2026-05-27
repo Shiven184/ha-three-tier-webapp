@@ -437,11 +437,12 @@ Resources:
   RDSInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
+  UpdateReplacePolicy: Snapshot
     Properties:
       DBInstanceIdentifier: !Sub '${ProjectName}-db'
       DBInstanceClass: !Ref DBInstanceClass
       Engine: mysql
-      EngineVersion: '8.0'
+      EngineVersion: '8.0.41'
       MasterUsername: admin
       MasterUserPassword: !Ref DBPassword
       DBName: appdb
