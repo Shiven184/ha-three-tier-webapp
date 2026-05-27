@@ -437,7 +437,7 @@ Resources:
   RDSInstance:
     Type: AWS::RDS::DBInstance
     DeletionPolicy: Snapshot
-  UpdateReplacePolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
     Properties:
       DBInstanceIdentifier: !Sub '${ProjectName}-db'
       DBInstanceClass: !Ref DBInstanceClass
