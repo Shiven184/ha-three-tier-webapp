@@ -453,7 +453,7 @@ Resources:
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups:
         - !Ref DBSecurityGroup
-      BackupRetentionPeriod: 7
+      BackupRetentionPeriod: 0
       DeletionProtection: false  # Set true in prod
       Tags:
         - Key: Project
