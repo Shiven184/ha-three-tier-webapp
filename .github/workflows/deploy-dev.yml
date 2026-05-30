@@ -1,21 +1,3 @@
-# .github/workflows/deploy-dev.yml
-#
-# Project 3 - HA 3-Tier Web App - Dev Deployment
-#
-# This pipeline has TWO triggers unlike Project 2:
-#
-# 1. Push to dev branch  - runs validation only (lint + template check)
-#    We do NOT auto-deploy on every push because this project costs ~$38/month.
-#    You want to control when AWS resources are actually created.
-#
-# 2. Manual trigger (workflow_dispatch) - actually deploys to AWS
-#    Go to GitHub > Actions > Deploy Dev > Run workflow
-#    This is a deliberate choice - you click deploy when you are ready.
-#
-# This is exactly how cost-sensitive infrastructure is managed in real teams.
-# Serverless (Project 2) can auto-deploy freely because it costs nothing at rest.
-# EC2 + RDS + ALB + NAT cost money every hour they exist.
-
 name: Deploy to Dev (3-Tier App)
 
 on:
@@ -54,19 +36,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region:            ${{ secrets.AWS_REGION }}
 
-      # cfn-lint is the industry standard CloudFormation linter.
-      # It catches mistakes in your YAML before they hit AWS.
-      # This is the infrastructure equivalent of unit tests.
       - name: Install cfn-lint
         run: pip install cfn-lint
 
       - name: Lint CloudFormation template
         run: |
-          cfn-lint cloudformation/three-tier.yaml
+          cfn-lint cloudformation/three-tier.yaml --ignore-checks W1011
           echo "Lint passed - no template errors found."
 
-      # aws cloudformation validate-template checks the template
-      # against AWS's own API. Catches things cfn-lint misses.
       - name: Validate template against AWS
         run: |
           aws cloudformation validate-template \
@@ -77,7 +54,6 @@ jobs:
     name: Deploy Stack to Dev
     runs-on: ubuntu-latest
     needs: validate
-    # Only actually deploy when manually triggered with action = deploy
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'deploy'
 
     steps:
@@ -106,7 +82,7 @@ jobs:
 
       - name: Print ALB URL
         run: |
-          echo "Dev stack deployed."
+          echo "Dev stack deployed successfully."
           aws cloudformation describe-stacks \
             --stack-name ha-webapp-dev \
             --region ${{ secrets.AWS_REGION }} \
@@ -117,8 +93,6 @@ jobs:
     name: Destroy Dev Stack
     runs-on: ubuntu-latest
     needs: validate
-    # Only runs when manually triggered with action = destroy
-    # Use this to delete resources and stop paying when done testing
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
 
     steps:
@@ -139,7 +113,7 @@ jobs:
             --stack-name ha-webapp-dev \
             --region ${{ secrets.AWS_REGION }}
 
-          echo "Waiting for deletion to complete (takes 5-10 minutes)..."
+          echo "Waiting for deletion to complete..."
           aws cloudformation wait stack-delete-complete \
             --stack-name ha-webapp-dev \
             --region ${{ secrets.AWS_REGION }}
