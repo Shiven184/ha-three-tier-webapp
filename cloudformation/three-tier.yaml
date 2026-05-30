@@ -442,7 +442,7 @@ Resources:
       DBInstanceIdentifier: !Sub '${ProjectName}-db'
       DBInstanceClass: !Ref DBInstanceClass
       Engine: mysql
-      EngineVersion: '8.0.41'
+      EngineVersion: '8.0.42'
       MasterUsername: admin
       MasterUserPassword: !Ref DBPassword
       DBName: appdb
